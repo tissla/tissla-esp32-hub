@@ -1,12 +1,18 @@
 CompileFlags:
+  CompilationDatabase: build/
   Remove:
-    - -mlongcalls
-    - -mtext-section-literals
-    - -fno-builtin-memcpy
-    - -fno-builtin-memset
-    - -fno-builtin-bzero
-    - -fno-builtin-stpcpy
-    - -fno-builtin-strncpy
-    - -fno-shrink-wrap
     - -fno-tree-switch-conversion
     - -fstrict-volatile-bitfields
+    - -mlongcalls
+    - -fno-shrink-wrap
+    - --target=*
+    - -march=*
+  Add:
+    - -DESP_PLATFORM
+    - -include
+    - /home/tissla/esp-idf/components/esp_system/include/esp_err.h
+
+Diagnostics:
+  Suppress:
+    - pp_file_not_found
+    - implicit-function-declaration

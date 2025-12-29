@@ -1,21 +1,20 @@
-#pragma once
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef enum {
-  LED_CMD_ON,
-  LED_CMD_OFF,
-  LED_CMD_BLINK,
-  LED_CMD_SET_BRIGHTNESS
-} led_cmd_type_t;
-
 typedef struct {
-  led_cmd_type_t type;
-  uint8_t brightness; // 0-255
-  uint16_t count;
-  uint16_t on_ms;
-  uint16_t off_ms;
-} led_cmd_t;
+  uint8_t r;
+  uint8_t g;
+  uint8_t b;
+} rgb_t;
 
-void led_api_init(int gpio_num);
-bool led_api_send(const led_cmd_t *cmd);
+void ws2812_init(int gpio, int num_leds);
+void ws2812_set_pixel(int index, uint8_t r, uint8_t g, uint8_t b);
+void ws2812_set_all(uint8_t r, uint8_t g, uint8_t b);
+void ws2812_show(void);
+void ws2812_clear(void);
+
+int ws2812_get_num_leds(void);
+rgb_t ws2812_get_pixel(int index);
+
+// builtin led for troubleshooting
+void builtin_led_blink(int count, int delay_ms);
