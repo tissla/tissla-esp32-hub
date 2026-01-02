@@ -3,5 +3,5 @@ idf_component_register(
         "main.c"
     INCLUDE_DIRS
         "."
-	REQUIRES wifi led http nvs_flash
+	REQUIRES wifi led http nvs_flash esp_driver_gpio
 )

@@ -10,15 +10,15 @@
 
 // WS2812 led constants
 // High for 0-signal
-#define WS2812_T0H_NS 350
+#define WS2812_T0H_NS 300
 // low for 0-signal
-#define WS2812_T0L_NS 900
+#define WS2812_T0L_NS 875
 // high for 1-signal
-#define WS2812_T1H_NS 900
+#define WS2812_T1H_NS 875
 // low for 1-signal
-#define WS2812_T1L_NS 350
+#define WS2812_T1L_NS 300
 // rest in microseconds
-#define WS2812_RESET_US 50
+#define WS2812_RESET_US 280
 
 // built in led (pin 2)
 #define BUILTIN_LED_GPIO 2
@@ -99,8 +99,17 @@ static esp_err_t ws2812_encoder_del(rmt_encoder_t *encoder) {
 }
 
 void ws2812_init(int gpio, int num_leds) {
+  ESP_LOGI(TAG, "=== WS2812 INIT START ===");
+  ESP_LOGI(TAG, "GPIO: %d, LEDs: %d", gpio, num_leds);
+
   s_num_leds = num_leds;
   s_pixels = calloc(num_leds, sizeof(rgb_t));
+
+  if (!s_pixels) {
+    ESP_LOGE(TAG, "Failed to allocate pixel memory!");
+    return;
+  }
+  ESP_LOGI(TAG, "Pixel buffer allocated: %d bytes", num_leds * sizeof(rgb_t));
 
   // RMT TX channel config
   rmt_tx_channel_config_t tx_cfg = {
@@ -110,10 +119,23 @@ void ws2812_init(int gpio, int num_leds) {
       .mem_block_symbols = 64,
       .trans_queue_depth = 4,
   };
-  ESP_ERROR_CHECK(rmt_new_tx_channel(&tx_cfg, &s_channel));
+
+  ESP_LOGI(TAG, "Creating RMT TX channel...");
+  esp_err_t err = rmt_new_tx_channel(&tx_cfg, &s_channel);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "❌ RMT channel creation FAILED: %s (0x%x)",
+             esp_err_to_name(err), err);
+    return;
+  }
+  ESP_LOGI(TAG, "✅ RMT TX channel created");
 
   // Create encoder
   ws2812_encoder_t *ws_enc = calloc(1, sizeof(ws2812_encoder_t));
+  if (!ws_enc) {
+    ESP_LOGE(TAG, "Failed to allocate encoder!");
+    return;
+  }
+
   ws_enc->base.encode = ws2812_encode;
   ws_enc->base.reset = ws2812_encoder_reset;
   ws_enc->base.del = ws2812_encoder_del;
@@ -130,20 +152,37 @@ void ws2812_init(int gpio, int num_leds) {
                .level1 = 0}, // T1H=900ns, T1L=300ns
       .flags.msb_first = 1,
   };
-  ESP_ERROR_CHECK(rmt_new_bytes_encoder(&bytes_cfg, &ws_enc->bytes_encoder));
+
+  ESP_LOGI(TAG, "Creating bytes encoder...");
+  err = rmt_new_bytes_encoder(&bytes_cfg, &ws_enc->bytes_encoder);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "❌ Bytes encoder creation FAILED: %s", esp_err_to_name(err));
+    return;
+  }
+  ESP_LOGI(TAG, "✅ Bytes encoder created");
 
   // Copy encoder for reset code
   rmt_copy_encoder_config_t copy_cfg = {};
-  ESP_ERROR_CHECK(rmt_new_copy_encoder(&copy_cfg, &ws_enc->copy_encoder));
+  err = rmt_new_copy_encoder(&copy_cfg, &ws_enc->copy_encoder);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "❌ Copy encoder creation FAILED: %s", esp_err_to_name(err));
+    return;
+  }
+  ESP_LOGI(TAG, "✅ Copy encoder created");
 
-  // Reset code: low for 50us
+  // Reset code: low for 280us
   ws_enc->reset_code = (rmt_symbol_word_t){
-      .duration0 = 500, .level0 = 0, .duration1 = 0, .level1 = 0};
+      .duration0 = 2800, .level0 = 0, .duration1 = 0, .level1 = 0};
 
   s_encoder = &ws_enc->base;
 
-  ESP_ERROR_CHECK(rmt_enable(s_channel));
-  ESP_LOGI(TAG, "WS2812 init: GPIO %d, %d LEDs", gpio, num_leds);
+  err = rmt_enable(s_channel);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "❌ RMT enable FAILED: %s", esp_err_to_name(err));
+    return;
+  }
+
+  ESP_LOGI(TAG, "✅✅✅ WS2812D init SUCCESS on GPIO %d ✅✅✅", gpio);
 }
 
 void ws2812_set_pixel(int index, uint8_t r, uint8_t g, uint8_t b) {
@@ -164,29 +203,56 @@ void ws2812_clear(void) {
 }
 
 void ws2812_show(void) {
+  ESP_LOGI(TAG, "=== ws2812_show() called ===");
+
+  if (!s_channel) {
+    ESP_LOGE(TAG, "❌ RMT channel is NULL!");
+    return;
+  }
+
+  if (!s_encoder) {
+    ESP_LOGE(TAG, "❌ Encoder is NULL!");
+    return;
+  }
+
   // WS2812 expects GRB order
   uint8_t *grb_data = malloc(s_num_leds * 3);
+  if (!grb_data) {
+    ESP_LOGE(TAG, "❌ Failed to allocate GRB buffer!");
+    return;
+  }
+
   for (int i = 0; i < s_num_leds; i++) {
     grb_data[i * 3 + 0] = s_pixels[i].g;
     grb_data[i * 3 + 1] = s_pixels[i].r;
     grb_data[i * 3 + 2] = s_pixels[i].b;
+
+    ESP_LOGI(TAG, "LED %d: R=%d G=%d B=%d -> GRB: %02x %02x %02x", i,
+             s_pixels[i].r, s_pixels[i].g, s_pixels[i].b, grb_data[i * 3 + 0],
+             grb_data[i * 3 + 1], grb_data[i * 3 + 2]);
   }
 
   rmt_transmit_config_t tx_config = {.loop_count = 0};
-  ESP_ERROR_CHECK(
-      rmt_transmit(s_channel, s_encoder, grb_data, s_num_leds * 3, &tx_config));
-  ESP_ERROR_CHECK(rmt_tx_wait_all_done(s_channel, portMAX_DELAY));
+
+  ESP_LOGI(TAG, "Transmitting %d bytes...", s_num_leds * 3);
+  esp_err_t err =
+      rmt_transmit(s_channel, s_encoder, grb_data, s_num_leds * 3, &tx_config);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "❌ rmt_transmit FAILED: %s", esp_err_to_name(err));
+    free(grb_data);
+    return;
+  }
+  ESP_LOGI(TAG, "Waiting for transmission...");
+
+  err = rmt_tx_wait_all_done(s_channel, portMAX_DELAY);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "❌ rmt_tx_wait_all_done FAILED: %s", esp_err_to_name(err));
+  } else {
+    ESP_LOGI(TAG, "✅ Transmission complete!");
+  }
 
   free(grb_data);
-}
-
-int ws2812_get_num_leds(void) { return s_num_leds; }
-
-rgb_t ws2812_get_pixel(int index) {
-  if (index >= 0 && index < s_num_leds) {
-    return s_pixels[index];
-  }
-  return (rgb_t){0, 0, 0};
+  ESP_LOGI(TAG, "=== ws2812_show() done ===");
 }
 
 // builtin led blink
@@ -206,4 +272,13 @@ void builtin_led_blink(int count, int delay_ms) {
       vTaskDelay(pdMS_TO_TICKS(delay_ms));
     }
   }
+}
+
+int ws2812_get_num_leds(void) { return s_num_leds; }
+
+rgb_t ws2812_get_pixel(int index) {
+  if (index >= 0 && index < s_num_leds) {
+    return s_pixels[index];
+  }
+  return (rgb_t){0, 0, 0};
 }
